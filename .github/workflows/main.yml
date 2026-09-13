@@ -1,0 +1,439 @@
+# ---------------------------------------------------------------------------
+# CI/CD for the Mini Data Platform.
+#
+# Design principle: CHEAP CHECKS FIRST. Lint fails in 40 seconds, so there is
+# no point spending 4 minutes building images before finding a typo. Jobs are
+# also split so the SHAPE of the failure tells you where to look before you
+# open a single log.
+#
+# You must be able to explain every line of this file from memory.
+# ---------------------------------------------------------------------------
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']          # a version tag triggers a versioned deploy
+  schedule:
+    - cron: '0 3 * * *'   # nightly: run the expensive e2e job
+  workflow_dispatch:      # manual button, also used for rollback
+    inputs:
+      rollback_to:
+        description: 'Version tag to re-deploy, e.g. v1.0.0. Leave blank for a normal deploy.'
+        required: false
+        type: string
+
+# Cancel an in-flight run when a new commit lands on the same branch.
+# Saves runner minutes and stops you reviewing stale results.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the default token can write to the repo. Narrow it, and
+# widen per-job only where genuinely needed.
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # =========================================================================
+  # TIER 1: seconds. Fails fast on style and syntax.
+  # =========================================================================
+  lint:
+    name: Lint (python, yaml, docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip                      # caches the pip download dir between runs
+
+      - name: Install dev tooling
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Black (format check)
+        # --check means "tell me", not "fix it". CI must never rewrite your code:
+        # a job that commits back to your branch is a job you cannot reason about.
+        run: black --check .
+
+      - name: Yamllint
+        run: yamllint .github/ config/ docker-compose.yml
+
+      - name: Hadolint (Dockerfiles)
+        # Lints Dockerfiles too, not just Python.
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          recursive: true
+          failure-threshold: warning
+        continue-on-error: true   # set to false once your Dockerfiles are clean
+
+      - name: Validate docker-compose syntax
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+  # =========================================================================
+  # TIER 2: ~1 minute. No Docker, no database, no network.
+  # =========================================================================
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Run unit tests with coverage
+        run: pytest tests/unit -m unit --cov=src --cov-report=xml --cov-report=term
+
+      - name: Upload coverage
+        # Artefacts survive the runner being destroyed. Without this, a
+        # failure is gone and you are debugging blind.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
+
+  # =========================================================================
+  # TIER 3: ~4 minutes. Real Postgres and MinIO, via SERVICE CONTAINERS.
+  #
+  # Deliberately NOT the whole four-service stack. Airflow and Metabase are
+  # slow to boot and are not what these tests exercise. The full stack belongs
+  # in the e2e job, which runs less often. Knowing which check belongs at
+  # which tier, and justifying it on cost and speed, is the point.
+  # =========================================================================
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: analytics
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U platform"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: ci_password
+          MINIO_DEFAULT_BUCKETS: 'raw,archive'
+        ports: ['9000:9000']
+
+    env:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: ci_password
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      ANALYTICS_DB: analytics
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: ci_password
+      MINIO_RAW_BUCKET: raw
+      MINIO_ARCHIVE_BUCKET: archive
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Apply database schema
+        # Same migrations/001_schema.sql file docker-compose applies locally
+        # (via config/postgres/init.sql). One source of schema truth for both.
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost -U platform -d analytics \
+            -v ON_ERROR_STOP=1 -f migrations/001_schema.sql
+
+      - run: pytest tests/integration -m integration
+      - run: pytest tests/data_quality -m data_quality
+
+  # =========================================================================
+  # TIER 3b: DAG validation. Catches Airflow bugs that otherwise only appear
+  # at runtime, in production, at 2am.
+  # =========================================================================
+  dag-validation:
+    name: Airflow DAG validation
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install Airflow (constrained), pytest and pandas
+        # Deliberately NOT `pip install -r requirements.txt`: it pulls in
+        # pandera/pydantic, whose newer typing_extensions conflicts with the
+        # older one Airflow's own constraints file pins, breaking the
+        # environment. The DAG itself doesn't need any of that - pandas/
+        # pandera/boto3 imports are all deferred inside task bodies, exactly
+        # so that importing the DAG only ever needs Airflow and the stdlib.
+        # pandas is the one exception: tests/conftest.py imports it at
+        # collection time for fixtures shared across the whole test suite.
+        run: |
+          pip install "apache-airflow==2.10.2" \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.2/constraints-3.11.txt"
+          pip install pytest==8.3.3 pandas==2.2.3
+      - run: pytest tests/unit/test_dag_validation.py -m unit
+        env:
+          AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+
+  # =========================================================================
+  # TIER 4: image build. Only after everything cheap has passed.
+  # =========================================================================
+  build-images:
+    name: Build images
+    runs-on: ubuntu-latest
+    needs: [integration-tests, dag-validation]
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write   # only this job needs to push; everything else stays read-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tag
+        id: image
+        run: |
+          repo=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "tag=ghcr.io/${repo}-airflow:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          cp .env.example .env
+          echo "AIRFLOW_IMAGE=${{ steps.image.outputs.tag }}" >> .env
+          docker compose build airflow-webserver
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        run: docker push ${{ steps.image.outputs.tag }}
+
+  # =========================================================================
+  # TIER 5: the headline check - proves data actually flows end to end.
+  # Expensive, so NOT on every PR. Runs on merge to main, on a version tag,
+  # and nightly.
+  # =========================================================================
+  e2e-data-flow:
+    name: E2E data flow (MinIO -> Airflow -> Postgres -> Metabase)
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Start the full stack
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
+
+      - name: Wait for every service to be healthy
+        # Poll with a deadline. NEVER `sleep 120`: too short is flaky, too long
+        # is slow, and a fixed sleep manages to be both on different machines.
+        run: |
+          for i in $(seq 1 60); do
+            unhealthy=$(docker ps --filter health=unhealthy --format '{{.Names}}')
+            starting=$(docker ps --filter health=starting --format '{{.Names}}')
+            if [ -z "$unhealthy" ] && [ -z "$starting" ]; then
+              echo "all healthy"; exit 0
+            fi
+            echo "waiting... starting=[$starting] unhealthy=[$unhealthy]"
+            sleep 10
+          done
+          echo "services did not become healthy in time"; exit 1
+
+      - name: Build the Metabase dashboard
+        # Same script a human runs locally after `make up`. Runs it on every
+        # e2e run so it stays proven to work, not just once by hand.
+        run: python scripts/setup_metabase.py
+        env:
+          METABASE_URL: http://localhost:3000
+          METABASE_ADMIN_EMAIL: admin@example.com
+          METABASE_ADMIN_PASSWORD: change_me_locally
+          METABASE_READONLY_USER: metabase_ro
+          METABASE_READONLY_PASSWORD: change_me_locally
+
+      - run: pytest tests/e2e -m e2e
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: change_me_locally
+          POSTGRES_HOST: localhost
+          ANALYTICS_DB: analytics
+          MINIO_ENDPOINT: http://localhost:9000
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: change_me_locally
+          AIRFLOW_URL: http://localhost:8080
+          AIRFLOW_ADMIN_USER: admin
+          AIRFLOW_ADMIN_PASSWORD: change_me_locally
+          METABASE_URL: http://localhost:3000
+          METABASE_ADMIN_EMAIL: admin@example.com
+          METABASE_ADMIN_PASSWORD: change_me_locally
+
+      - name: Dump container logs on failure
+        # Without this you are debugging a destroyed machine from memory.
+        if: failure()
+        run: docker compose logs --no-color --tail=300
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # =========================================================================
+  # CD: gated on a human. Continuous DELIVERY, not Deployment.
+  #
+  # A bad web deploy shows a broken page you roll back in a minute. A bad data
+  # deploy can overwrite a warehouse table and destroy the original in the
+  # process. That asymmetry is why the gate exists.
+  # =========================================================================
+  deploy:
+    name: Deploy to test environment
+    runs-on: ubuntu-latest
+    needs: e2e-data-flow
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    environment:
+      name: test          # configure required reviewers on this in repo settings
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Rollback is just "deploy a known-good tag". A tested old version
+          # beats a rushed hot-fix written under pressure at 2am.
+          ref: ${{ inputs.rollback_to || github.ref }}
+
+      - name: Resolve the exact commit and image being deployed
+        # Reading the commit off the checked-out ref (rather than
+        # github.sha, which is the *triggering* commit) is what makes
+        # rollback work: it finds the image that commit's own CI run
+        # already built and pushed, instead of rebuilding anything here.
+        id: target
+        run: |
+          sha=$(git rev-parse HEAD)
+          repo=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${repo}-airflow:${sha}" >> "$GITHUB_OUTPUT"
+          echo "Deploying ref: ${{ inputs.rollback_to || github.ref_name }} (commit $sha)"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the published image
+        run: docker pull ${{ steps.target.outputs.image }}
+
+      - name: Bring the stack up from scratch on this runner
+        # No persistent host or cloud budget available (ADR-004 in
+        # docs/decisions.md): "deploy" means a clean bring-up of the exact
+        # published image on a fresh runner, proven healthy by the smoke
+        # test below. A real deployment would add a persistent target host,
+        # secrets from a vault, and a blue-green or canary release strategy.
+        run: |
+          cp .env.example .env
+          echo "AIRFLOW_IMAGE=${{ steps.target.outputs.image }}" >> .env
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
+
+      - name: Wait for every service to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            unhealthy=$(docker ps --filter health=unhealthy --format '{{.Names}}')
+            starting=$(docker ps --filter health=starting --format '{{.Names}}')
+            if [ -z "$unhealthy" ] && [ -z "$starting" ]; then
+              echo "all healthy"; exit 0
+            fi
+            sleep 10
+          done
+          echo "services did not become healthy in time"; exit 1
+
+      - name: Smoke test
+        # Small and fast: is the system fundamentally alive after a deploy?
+        # Not exhaustive - the e2e job already proved the data actually
+        # flows correctly before we ever got here.
+        run: |
+          curl --fail http://localhost:8080/health
+          curl --fail http://localhost:3000/api/health
+          docker compose exec -T postgres pg_isready -U platform
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # =========================================================================
+  # Notify. Alert only on what a human must act on.
+  # =========================================================================
+  notify-failure:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests, dag-validation, e2e-data-flow]
+    if: failure() && github.event_name != 'pull_request'
+    steps:
+      - name: Send alert
+        # Posts to Slack if SLACK_WEBHOOK_URL is set as a repo secret;
+        # otherwise just logs, which is what a fork or a fresh clone gets.
+        # Says which run, on which ref, with a direct link - "CI failed" on
+        # its own just makes someone open five tabs to find out why.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          message="Mini Data Platform CI failed on ${{ github.ref_name }} (${{ github.sha }}). ${RUN_URL}"
+          echo "$message"
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -sf -X POST -H 'Content-Type: application/json' \
+              -d "{\"text\": \":red_circle: ${message}\"}" \
+              "$SLACK_WEBHOOK_URL"
+          else
+            echo "SLACK_WEBHOOK_URL not set - add it as a repo secret to get Slack alerts."
+          fi

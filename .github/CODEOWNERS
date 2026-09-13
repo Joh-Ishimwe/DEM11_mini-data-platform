@@ -1,0 +1,10 @@
+# Maps paths to owners so GitHub auto-requests the right review.
+# One team here since this is a solo project - split by role as the team grows.
+
+* @Joh-Ishimwe
+
+/dags/                    @Joh-Ishimwe
+/src/                      @Joh-Ishimwe
+/.github/workflows/        @Joh-Ishimwe
+/docker-compose.yml        @Joh-Ishimwe
+/config/postgres/          @Joh-Ishimwe
