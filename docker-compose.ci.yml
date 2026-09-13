@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# CI overrides. Used as:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
+#
+# Purpose: same stack, smaller and quieter, so the end-to-end job on a GitHub
+# runner (2 CPU, 7GB RAM) does not time out or thrash.
+#
+# Host ports stay published (unlike most CI overrides you'll see elsewhere):
+# tests/e2e runs directly on the runner, not inside the compose network, and
+# needs localhost:5432 / localhost:9000 / localhost:8080 / localhost:3000 to
+# reach these containers at all.
+# ---------------------------------------------------------------------------
+services:
+  metabase:
+    # Metabase is slow to boot and only needs a health check in CI, not a UI.
+    environment:
+      MB_JETTY_PORT: 3000
+      JAVA_OPTS: "-Xmx1g"
