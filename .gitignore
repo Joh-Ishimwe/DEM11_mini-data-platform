@@ -1,0 +1,39 @@
+# Environment / secrets
+.env
+*.pem
+*.key
+
+# Data: raw and processed are NEVER committed. data/samples/ IS committed.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/
+!data/samples/
+
+# Docker volumes (if bind-mounted locally)
+volumes/
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+*.egg-info/
+
+# Airflow local artefacts
+airflow.db
+airflow-webserver.pid
+standalone_admin_password.txt
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

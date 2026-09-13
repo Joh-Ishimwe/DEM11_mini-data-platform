@@ -1,0 +1,42 @@
+# Non-secret configuration. Secrets live in .env, never here.
+# Read by src/utils/constants.py.
+
+environment: dev
+
+minio:
+  raw_bucket: raw
+  archive_bucket: archive
+  file_prefix: sales/
+  timeout_seconds: 30
+
+postgres:
+  target_schema: marts
+  target_table: sales_orders
+  quarantine_table: staging.rejected_rows
+  metrics_table: staging.pipeline_runs
+  statement_timeout_seconds: 60
+
+pipeline:
+  batch_size: 5000
+  max_retries: 3
+  retry_backoff_base_seconds: 2
+
+validation:
+  # Which checks stop the whole run, and which only quarantine the bad row.
+  # Deciding this correctly IS the exercise. See src/transformations/validation.py.
+  fatal_checks:
+    - required_columns_present
+    - schema_types_coercible
+  quarantine_checks:
+    - order_id_not_null
+    - order_id_unique
+    - customer_id_not_null
+    - quantity_positive
+    - unit_price_non_negative
+    - order_date_not_future
+    - product_category_known
+
+  known_categories: [electronics, apparel, home, grocery, toys, sports]
+  allowed_currencies: [USD, EUR, GBP, RWF, KES]
+  # Freshness/volume guardrail: a run loading <20% of yesterday's rows is suspicious.
+  row_count_drop_alert_threshold: 0.2

@@ -1,0 +1,43 @@
+# Pre-commit hooks: Git runs these on YOUR machine before a commit is created,
+# so formatting and lint errors never even reach GitHub.
+#
+# Division of labour, and understand it properly:
+#   pre-commit = fast feedback for you
+#   CI         = enforcement for the team
+#
+# Pre-commit can be bypassed with `git commit --no-verify`, so CI MUST re-run
+# the same checks. Never rely on pre-commit alone.
+#
+# Install once:  pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']     # stops someone committing a 200MB CSV
+      - id: check-merge-conflict
+      - id: detect-private-key    # cheap insurance against a credential leak
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  # black, not ruff-format: CI and `make fmt` both use black, and the two
+  # formatters don't agree on every edge case. One formatter, everywhere.
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+
+  - repo: local
+    hooks:
+      - id: no-raw-data
+        name: block committing anything from data/raw
+        entry: Files under data/raw/ must never be committed.
+        language: fail
+        files: ^data/raw/(?!\.gitkeep)

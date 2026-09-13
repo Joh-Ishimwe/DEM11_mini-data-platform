@@ -1,0 +1,11 @@
+# Runtime dependencies for the pipeline code in src/ and data_generator/.
+# Pinned to minor versions: reproducible builds matter more than newest.
+pandas==2.2.3
+pyarrow==17.0.0
+boto3==1.35.36
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.35
+pandera==0.20.4
+python-dotenv==1.0.1
+pyyaml==6.0.2
+tenacity==9.0.0
