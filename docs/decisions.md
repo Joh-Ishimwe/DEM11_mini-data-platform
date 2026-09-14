@@ -65,9 +65,9 @@ blast radius is the whole argument.
 
 ## ADR-006: End-to-end tests do not run on every pull request
 **Context.** The e2e job takes 15 minutes and occasionally flakes.
-**Decision.** Run it on merge to `main`, on version tags, and nightly.
+**Decision.** Run it on merge to `master`, on version tags, and nightly.
 **Consequences.** A PR can be merged without proof of full-stack health,
-covered by the fact that merge to main runs it before anything is deployed.
+covered by the fact that merge to master runs it before anything is deployed.
 Accepted because a check people learn to ignore is worse than no check, and
 15 minutes on every push is how teams start ignoring CI.
 

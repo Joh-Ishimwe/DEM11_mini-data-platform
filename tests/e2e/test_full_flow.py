@@ -5,7 +5,7 @@ Proves data actually moves across all four hops:
     -> Metabase (API check)
 
 Needs the FULL stack running. Slow, and occasionally flaky. Run it on merge
-to main and nightly, NOT on every commit to every branch: fast checks on
+to master and nightly, NOT on every commit to every branch: fast checks on
 every push, expensive checks less often, is the core cost/coverage trade-off
 of CI design.
 """

@@ -97,7 +97,7 @@ Anything in `src/` runs in milliseconds on a CI runner with no Docker at all.
 | `integration-tests` | Postgres + MinIO service containers | 4m |
 | `dag-validation` | imports every DAG, checks owner/retries/timeout/cycles | 2m |
 | `build-images` | after the above pass | 4m |
-| `e2e-data-flow` | merge to main, tags, nightly | 15m |
+| `e2e-data-flow` | merge to master, tags, nightly | 15m |
 | `deploy` | version tags, behind a manual approval gate | |
 
 **Why e2e is not on every PR:** it is slow and occasionally flaky, and a check

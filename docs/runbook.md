@@ -104,9 +104,9 @@ exist:
 Neither one requires a code change - both are silent no-ops (log-only) until
 the variable/secret exists.
 
-## Protecting `main`
+## Protecting `master`
 
-Settings -> Branches -> add a rule for `main`: require the CI status checks
+Settings -> Branches -> add a rule for `master`: require the CI status checks
 (`lint`, `unit-tests`, `integration-tests`, `dag-validation`) to pass, and
 require a pull request before merging. Combined with the `test` deploy
 environment's required reviewer, no change reaches a deployed environment

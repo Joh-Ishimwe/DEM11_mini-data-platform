@@ -26,7 +26,7 @@ is why `validation.py` runs inside the pipeline and not only in tests.
 | Data quality | expectations against messy samples | every PR | nothing | <30s |
 | Integration | real Postgres, real MinIO | every PR | service containers | <5m |
 | DAG validation | imports, cycles, owner, retries, timeout | every PR | Airflow only | <2m |
-| E2E | all four hops, plus idempotency | main, tags, nightly | full stack | <20m |
+| E2E | all four hops, plus idempotency | master, tags, nightly | full stack | <20m |
 | Runtime quality | real data, every run | production | live data | per run |
 
 Pre-commit can be bypassed with `--no-verify`, so CI re-runs the same checks.
