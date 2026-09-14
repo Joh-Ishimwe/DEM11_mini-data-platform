@@ -137,13 +137,11 @@ jobs:
           --health-cmd "pg_isready -U platform"
           --health-interval 5s --health-timeout 5s --health-retries 10
 
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: ci_password
-          MINIO_DEFAULT_BUCKETS: 'raw,archive'
-        ports: ['9000:9000']
+      # MinIO is NOT a `services:` entry: that syntax can't pass the
+      # `server /data` command the official image requires (services only
+      # take image/env/ports/options, no `command`). Started by hand below
+      # instead - the same quay.io/minio/minio image and tag docker-compose.yml
+      # uses, so there is one image to trust rather than two.
 
     env:
       POSTGRES_USER: platform
@@ -173,8 +171,29 @@ jobs:
           PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost -U platform -d analytics \
             -v ON_ERROR_STOP=1 -f migrations/001_schema.sql
 
+      - name: Start MinIO
+        # Same image + tag as docker-compose.yml's minio service (quay.io,
+        # not Docker Hub - MinIO Inc. stopped publishing there).
+        run: |
+          docker run -d --name minio -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=$MINIO_ROOT_USER \
+            -e MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --console-address ":9001"
+
+      - name: Wait for MinIO and create buckets
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 2
+          done
+          python scripts/ci_create_minio_buckets.py
+
       - run: pytest tests/integration -m integration
       - run: pytest tests/data_quality -m data_quality
+
+      - name: Stop MinIO
+        if: always()
+        run: docker rm -f minio || true
 
   # =========================================================================
   # TIER 3b: DAG validation. Catches Airflow bugs that otherwise only appear
