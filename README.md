@@ -21,7 +21,7 @@ data_generator  ->  MinIO (raw/)  ->  Airflow  ->  Postgres (marts)  ->  Metabas
 | Service | Image | Purpose | URL |
 |---|---|---|---|
 | Postgres | `postgres:16-alpine` | warehouse + Airflow metadata + Metabase app DB | `localhost:5432` |
-| MinIO | `minio/minio` | S3-compatible landing zone | `localhost:9001` (console) |
+| MinIO | `quay.io/minio/minio` | S3-compatible landing zone | `localhost:9001` (console) |
 | Airflow | `apache/airflow:2.10.2` | orchestration | `localhost:8080` |
 | Metabase | `metabase/metabase` | BI dashboards | `localhost:3000` |
 
