@@ -18,7 +18,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 import pandas as pd
-import pandera as pa
 
 from src.utils.errors import ValidationError
 
@@ -48,7 +47,7 @@ def check_required_columns(df: pd.DataFrame, required: tuple[str, ...]) -> None:
         raise ValidationError(f"missing required column(s): {', '.join(missing)}")
 
 
-def build_schema() -> pa.DataFrameSchema:
+def build_schema():
     """Return a pandera DataFrameSchema describing the expected shape.
 
     SCHEMA = the agreed structure: which columns, what types, nullable or not.
@@ -59,7 +58,16 @@ def build_schema() -> pa.DataFrameSchema:
     Nullability here mirrors the QUARANTINE checks, not the final table:
     a null order_id is still a schema-valid *string column entry* (None),
     it is validate() that decides it must be rejected.
+
+    pandera is imported here, not at module level: nothing on the real
+    pipeline path calls this function (validate() does its own checks
+    directly), and pandera drags in a pydantic/typing_extensions combination
+    that conflicts with what Airflow itself pins. Keeping the import lazy
+    means the Airflow image doesn't need pandera installed at all - see
+    docker/airflow/Dockerfile.
     """
+    import pandera as pa
+
     return pa.DataFrameSchema(
         {
             "order_id": pa.Column(str, nullable=True),

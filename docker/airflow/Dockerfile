@@ -14,7 +14,14 @@ COPY requirements.txt /tmp/requirements.txt
 # instead of quietly breaking the scheduler at runtime - it would fail this
 # build loudly instead, which is what requirements.txt's matching pins above
 # are for.
+#
+# pandera is excluded: nothing on the DAG's actual execution path needs it
+# (see src/transformations/validation.py), and it hard-requires a pydantic/
+# typing_extensions combination newer than what Airflow's constraints allow -
+# a real conflict, not just a version mismatch, so it's left out here rather
+# than fought.
 # hadolint ignore=DL3013
-RUN pip install --no-cache-dir \
+RUN grep -v '^pandera' /tmp/requirements.txt > /tmp/requirements-airflow.txt && \
+    pip install --no-cache-dir \
       --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.2/constraints-3.11.txt" \
-      -r /tmp/requirements.txt
+      -r /tmp/requirements-airflow.txt
