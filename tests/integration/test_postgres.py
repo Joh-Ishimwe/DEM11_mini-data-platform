@@ -43,21 +43,55 @@ def test_loading_the_same_file_twice_does_not_duplicate(pg_config, clean_df, fix
     assert first == second
 
 
-def test_partial_failure_rolls_back_the_whole_file(pg_config, clean_df, fixed_now):
-    """Half a file loaded is worse than none: you cannot tell it happened."""
+def test_partial_failure_rolls_back_the_whole_file(pg_config, fixed_now):
+    """Half a file loaded is worse than none: you cannot tell it happened.
+
+    Deliberately NOT clean_df: that fixture's order_ids (ORD-001, ORD-002)
+    are also used - and already inserted into this same database - by
+    test_loading_the_same_file_twice_does_not_duplicate above. Reusing them
+    here would make `count == 0` fail even with a perfectly correct rollback,
+    because those rows already existed for an unrelated reason. This test
+    only means something against order_ids nothing else has touched.
+    """
+    import pandas as pd
     from sqlalchemy import text
 
     from src.storage.postgres import PostgresStorage
     from src.transformations import business_rules, cleaning
     from src.utils.errors import PermanentError
 
-    storage = PostgresStorage(pg_config)
-    df = cleaning.clean(
-        clean_df, source_file="rollback_test.csv", ingested_at=fixed_now
+    raw = pd.DataFrame(
+        [
+            {
+                "order_id": "ROLLBACK-001",
+                "customer_id": "C1",
+                "order_date": "2026-01-10",
+                "product_category": "electronics",
+                "quantity": 2,
+                "unit_price": 10.0,
+                "currency": "USD",
+                "country": "Rwanda",
+            },
+            {
+                "order_id": "ROLLBACK-002",
+                "customer_id": "C2",
+                "order_date": "2026-01-10",
+                "product_category": "electronics",
+                "quantity": 1,
+                "unit_price": 5.0,
+                "currency": "USD",
+                "country": "Rwanda",
+            },
+        ]
     )
+    storage = PostgresStorage(pg_config)
+    df = cleaning.clean(raw, source_file="rollback_test.csv", ingested_at=fixed_now)
     df = business_rules.apply_business_rules(df)
-    # Sabotage one row so the batch violates the quantity > 0 check constraint.
-    df.loc[df.index[0], "quantity"] = -1
+    # Sabotage the LAST row, not the first: the first row must succeed before
+    # the failure, so a rollback that only undoes the failing row (instead of
+    # the whole transaction) would still leave it behind and this test would
+    # not catch that.
+    df.loc[df.index[-1], "quantity"] = -1
 
     with pytest.raises(PermanentError):
         storage.upsert_orders(df, run_id="rollback-test")
