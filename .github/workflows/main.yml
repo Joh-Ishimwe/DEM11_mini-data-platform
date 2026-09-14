@@ -12,9 +12,9 @@ name: CI/CD
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
   push:
-    branches: [main]
+    branches: [master]
     tags: ['v*']          # a version tag triggers a versioned deploy
   schedule:
     - cron: '0 3 * * *'   # nightly: run the expensive e2e job
@@ -416,7 +416,7 @@ jobs:
   notify-failure:
     name: Notify on failure
     runs-on: ubuntu-latest
-    needs: [lint, unit-tests, integration-tests, dag-validation, e2e-data-flow]
+    needs: [lint, unit-tests, integration-tests, dag-validation, build-images, e2e-data-flow, deploy]
     if: failure() && github.event_name != 'pull_request'
     steps:
       - name: Send alert
