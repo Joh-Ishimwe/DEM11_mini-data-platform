@@ -1,16 +1,18 @@
 # Runtime dependencies for the pipeline code in src/ and data_generator/.
 # Pinned to minor versions: reproducible builds matter more than newest.
 #
-# pandas/pyarrow/sqlalchemy/psycopg2-binary/pyyaml/python-dotenv/tenacity are
-# ALSO pinned to exactly what Airflow 2.10.2's own constraints file requires
+# Every package below except pandera is ALSO pinned to exactly what Airflow
+# 2.10.2's own constraints file requires
 # (https://raw.githubusercontent.com/apache/airflow/constraints-2.10.2/constraints-3.11.txt).
 # This code runs inside the Airflow image too (see docker/airflow/Dockerfile),
-# sharing that one Python environment - a newer sqlalchemy here previously
-# silently overrode the older one Airflow's own ORM needs, and the scheduler
-# never came up. Bump these only in step with an Airflow version bump.
+# sharing that one Python environment - a newer pin here previously silently
+# overrode what Airflow itself needs (sqlalchemy broke the scheduler; boto3
+# broke the image build outright once the constraint file was applied).
+# Bump these only in step with an Airflow version bump, checked against that
+# constraints file again.
 pandas==2.1.4
 pyarrow==16.1.0
-boto3==1.35.36
+boto3==1.35.16
 psycopg2-binary==2.9.9
 sqlalchemy==1.4.54
 pandera==0.20.4
