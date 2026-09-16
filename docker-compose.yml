@@ -146,13 +146,20 @@ services:
   airflow-init:
     <<: *airflow-common
     container_name: mdp-airflow-init
+    # NOTE: the continuation lines below need a trailing backslash, not just
+    # extra indentation. YAML's folded scalar (>) only folds a newline into a
+    # space between lines at the SAME indentation; a more-indented line (like
+    # --username here) keeps its newline literal. Without the backslash, bash
+    # saw "airflow users create" as one complete statement and "--username
+    # ..." as another - which fails immediately ("command not found") and was
+    # silently swallowed by the trailing `|| true`.
     entrypoint: >
       /bin/bash -c "
       airflow db migrate &&
-      airflow users create
-        --username ${AIRFLOW_ADMIN_USER}
-        --password ${AIRFLOW_ADMIN_PASSWORD}
-        --firstname Data --lastname Engineer --role Admin
+      airflow users create \
+        --username ${AIRFLOW_ADMIN_USER} \
+        --password ${AIRFLOW_ADMIN_PASSWORD} \
+        --firstname Data --lastname Engineer --role Admin \
         --email admin@example.com || true "
     restart: "no"
 
