@@ -26,6 +26,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
       postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${AIRFLOW_DB}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Default auth backend (airflow.api.auth.backend.session) only accepts an
+    # already-logged-in browser session cookie - it rejects a plain HTTP
+    # Basic Auth request outright with 403, which is exactly how tests/e2e
+    # (and anyone scripting against the REST API) authenticates. Adding
+    # basic_auth alongside it is what makes that work.
+    AIRFLOW__API__AUTH_BACKENDS: >-
+      airflow.api.auth.backend.session,airflow.api.auth.backend.basic_auth
     # Defaults (4 webserver workers, 2 DAG-parsing processes) are tuned for a
     # real server. On a small box - or a 2-CPU/7GB CI runner also running
     # Postgres, MinIO and Metabase at the same time - that's enough to starve
