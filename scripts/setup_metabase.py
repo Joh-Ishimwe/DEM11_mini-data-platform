@@ -225,20 +225,30 @@ def build_dashboard(token: str, card_ids: list[int]) -> int:
     )
     dashboard_id = dashboard["id"]
 
+    # There is no "add one card" endpoint in this Metabase version - adding
+    # cards to a dashboard means PUT-ing the dashboard's ENTIRE dashcards
+    # list. Each new dashcard needs a unique NEGATIVE id (Metabase's
+    # convention for "not created yet, please assign a real one") alongside
+    # the real, positive card_id of the question it displays.
+    dashcards = []
     for i, card_id in enumerate(card_ids):
         row, col = divmod(i, 2)
-        _request(
-            "POST",
-            f"/api/dashboard/{dashboard_id}/cards",
-            token=token,
-            body={
-                "cardId": card_id,
+        dashcards.append(
+            {
+                "id": -(i + 1),
+                "card_id": card_id,
                 "row": row * 4,
                 "col": col * 6,
                 "size_x": 6,
                 "size_y": 4,
-            },
+            }
         )
+    _request(
+        "PUT",
+        f"/api/dashboard/{dashboard_id}",
+        token=token,
+        body={"dashcards": dashcards},
+    )
     print(
         f"Dashboard '{DASHBOARD_NAME}' built (id={dashboard_id}) with {len(card_ids)} cards."
     )
@@ -252,7 +262,7 @@ def main() -> int:
     token = ensure_admin_and_login()
     database_id = ensure_database(token)
 
-    print("Creating the four dashboard cards...")
+    print(f"Creating the {len(QUESTIONS)} dashboard cards...")
     card_ids = [
         create_question(token, database_id, q["name"], q["sql"], q["display"])
         for q in QUESTIONS
