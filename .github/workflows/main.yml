@@ -288,14 +288,17 @@ jobs:
       - name: Start the full stack
         run: |
           cp .env.example .env
-          # Airflow writes its own logs into the bind-mounted ./logs, as the
-          # AIRFLOW_UID user. Left at the .env.example default (50000) that
-          # user doesn't own this checkout on the runner, so every write
-          # fails with PermissionError and both airflow-web and
-          # airflow-scheduler crash-loop forever. Matching AIRFLOW_UID to
-          # whoever actually owns the checkout here is the same fix the
-          # README already asks Linux users to do locally (`id -u`).
-          echo "AIRFLOW_UID=$(id -u)" >> .env
+          # Airflow writes its own logs into the bind-mounted ./logs as
+          # uid 50000 (the image's built-in "airflow" user - AIRFLOW_UID
+          # stays at that default, NOT the runner's own uid: the image's
+          # /etc/passwd only knows uid 50000, and pointing it at an
+          # arbitrary host uid instead makes the `airflow` CLI itself crash
+          # with "getpwuid(): uid not found" before it does anything).
+          # The runner's checkout is owned by the runner user, not 50000, so
+          # without this the container can't write there at all and both
+          # airflow-web and airflow-scheduler crash-loop forever.
+          mkdir -p logs
+          chmod -R a+rwx logs
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 
       - name: Wait for every service to be healthy
@@ -417,9 +420,12 @@ jobs:
         run: |
           cp .env.example .env
           echo "AIRFLOW_IMAGE=${{ steps.target.outputs.image }}" >> .env
-          # See the same line in the e2e job: without this, Airflow can't
-          # write to the bind-mounted ./logs and both its processes crash-loop.
-          echo "AIRFLOW_UID=$(id -u)" >> .env
+          # See the e2e job: Airflow needs to write to the bind-mounted
+          # ./logs as its built-in uid 50000, not the runner's own uid
+          # (which the image's /etc/passwd doesn't know, crashing `airflow`
+          # CLI outright rather than just failing to write a log file).
+          mkdir -p logs
+          chmod -R a+rwx logs
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 
       - name: Wait for every service to be healthy
