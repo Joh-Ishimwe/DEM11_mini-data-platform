@@ -146,21 +146,17 @@ services:
   airflow-init:
     <<: *airflow-common
     container_name: mdp-airflow-init
-    # NOTE: the continuation lines below need a trailing backslash, not just
-    # extra indentation. YAML's folded scalar (>) only folds a newline into a
-    # space between lines at the SAME indentation; a more-indented line (like
-    # --username here) keeps its newline literal. Without the backslash, bash
-    # saw "airflow users create" as one complete statement and "--username
-    # ..." as another - which fails immediately ("command not found") and was
-    # silently swallowed by the trailing `|| true`.
+    # One physical line, deliberately. An earlier version wrapped this across
+    # several indented lines relying on YAML/shell line-continuation to join
+    # them back together - which looked right in isolated testing but still
+    # broke inside the real container (argparse reported every flag as
+    # missing despite them being present in the joined string). Not worth
+    # chasing further: a single line has no folding or continuation behaviour
+    # to get subtly wrong in the first place.
+    # yamllint disable rule:line-length
     entrypoint: >
-      /bin/bash -c "
-      airflow db migrate &&
-      airflow users create \
-        --username ${AIRFLOW_ADMIN_USER} \
-        --password ${AIRFLOW_ADMIN_PASSWORD} \
-        --firstname Data --lastname Engineer --role Admin \
-        --email admin@example.com || true "
+      /bin/bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Data --lastname Engineer --role Admin --email admin@example.com || true"
+    # yamllint enable rule:line-length
     restart: "no"
 
   airflow-webserver:

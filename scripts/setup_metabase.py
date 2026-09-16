@@ -33,10 +33,11 @@ import json as _json
 
 MB_URL = os.environ.get("METABASE_URL", "http://localhost:3000")
 ADMIN_EMAIL = os.environ.get("METABASE_ADMIN_EMAIL", "admin@example.com")
-ADMIN_PASSWORD = os.environ.get(
-    "METABASE_ADMIN_PASSWORD",
-    os.environ.get("AIRFLOW_ADMIN_PASSWORD", "change_me_locally"),
-)
+# Metabase's own setup form rejects "change_me_locally" as too common - it
+# runs new passwords through a strength/common-password check that none of
+# this project's other services apply, so the fallback here can't reuse the
+# same placeholder those use.
+ADMIN_PASSWORD = os.environ.get("METABASE_ADMIN_PASSWORD", "ChangeMe-2026!Local")
 ADMIN_FIRST_NAME = os.environ.get("METABASE_ADMIN_FIRST_NAME", "Data")
 ADMIN_LAST_NAME = os.environ.get("METABASE_ADMIN_LAST_NAME", "Engineer")
 
