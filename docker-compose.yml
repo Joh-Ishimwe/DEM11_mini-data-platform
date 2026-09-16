@@ -26,6 +26,14 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
       postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${AIRFLOW_DB}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Defaults (4 webserver workers, 2 DAG-parsing processes) are tuned for a
+    # real server. On a small box - or a 2-CPU/7GB CI runner also running
+    # Postgres, MinIO and Metabase at the same time - that's enough to starve
+    # everything of memory and CPU, which shows up as containers stuck
+    # "starting" forever rather than a clean error. This platform's scale
+    # (a few files a day) doesn't need the defaults either way.
+    AIRFLOW__WEBSERVER__WORKERS: '2'
+    AIRFLOW__SCHEDULER__PARSING_PROCESSES: '1'
     # Makes `from src.transformations import cleaning` work inside the container.
     PYTHONPATH: /opt/airflow
     # Pipeline config, read by src/utils/constants.py

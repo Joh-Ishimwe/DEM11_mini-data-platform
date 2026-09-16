@@ -16,3 +16,17 @@ services:
     environment:
       MB_JETTY_PORT: 3000
       JAVA_OPTS: "-Xmx1g"
+
+  # Airflow's local-dev healthcheck timing (60s grace, then unhealthy within
+  # a few minutes) assumes a laptop with nothing else running. On this
+  # runner, Postgres + MinIO + Metabase + two Airflow processes are all
+  # booting at once on 2 shared CPUs - give both processes real room before
+  # deciding they're actually broken rather than just slow.
+  airflow-webserver:
+    healthcheck:
+      start_period: 180s
+      retries: 20
+  airflow-scheduler:
+    healthcheck:
+      start_period: 180s
+      retries: 20

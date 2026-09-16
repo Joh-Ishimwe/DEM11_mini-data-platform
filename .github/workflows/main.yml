@@ -293,8 +293,11 @@ jobs:
       - name: Wait for every service to be healthy
         # Poll with a deadline. NEVER `sleep 120`: too short is flaky, too long
         # is slow, and a fixed sleep manages to be both on different machines.
+        # 90*10s = 15 minutes: Airflow's own healthcheck start_period+retries
+        # in docker-compose.ci.yml now allows up to ~10 minutes on this
+        # constrained runner, so the outer loop needs real headroom above that.
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             unhealthy=$(docker ps --filter health=unhealthy --format '{{.Names}}')
             starting=$(docker ps --filter health=starting --format '{{.Names}}')
             if [ -z "$unhealthy" ] && [ -z "$starting" ]; then
@@ -402,7 +405,7 @@ jobs:
 
       - name: Wait for every service to be healthy
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             unhealthy=$(docker ps --filter health=unhealthy --format '{{.Names}}')
             starting=$(docker ps --filter health=starting --format '{{.Names}}')
             if [ -z "$unhealthy" ] && [ -z "$starting" ]; then
