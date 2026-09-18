@@ -11,11 +11,13 @@ into a dashboard - all wired up with GitHub Actions.
 
 ## Architecture
 
-```
-data_generator  ->  MinIO (raw/)  ->  Airflow  ->  Postgres (marts)  ->  Metabase
-                    landing zone      orchestr.    warehouse            dashboards
-                                          |
-                                          +-----> Postgres (airflow db)
+```mermaid
+flowchart LR
+    A[data_generator] --> B["MinIO<br/>(raw/)"]
+    B --> C["Airflow<br/>clean · validate · load"]
+    C --> D["Postgres<br/>(marts)"]
+    D --> E[Metabase]
+    C -.-> F["Postgres<br/>(airflow db)"]
 ```
 
 | Service | Image | Purpose | URL |
