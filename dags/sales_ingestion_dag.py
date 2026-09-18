@@ -105,7 +105,9 @@ def _deserialize(payload: str, date_columns: list[str] | None = None) -> pd.Data
     """JSON string -> DataFrame. `date_columns` opts specific columns back
     into real datetimes; everything else stays exactly as written, so this
     never silently reinterprets a column read_json's heuristics guess wrong."""
-    return pd.read_json(io.StringIO(payload), orient="records", convert_dates=date_columns or False)
+    return pd.read_json(
+        io.StringIO(payload), orient="records", convert_dates=date_columns or False
+    )
 
 
 def _record_run_failure(context) -> None:
